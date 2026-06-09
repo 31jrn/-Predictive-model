@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from scipy.stats import zscore
 from sklearn.ensemble import IsolationForest
@@ -12,6 +13,11 @@ from sklearn.neighbors import LocalOutlierFactor
 class DataPreprocessing:
     def __init__(self, dataframe):
         self.df = dataframe.copy()
+
+    def select_experiment(self, speed, load):
+        return self.df[
+            (self.df["speedSet"] == speed) & (self.df["load_value"] == load)
+        ].copy()
 
     # IQR метод
     def detect_outliers_iqr(self, columns=None, multiplier=1.5):
@@ -89,32 +95,37 @@ class DataPreprocessing:
             "IQR": len(self.detect_outliers_iqr(columns)),
             "Z-score": len(self.detect_outliers_zscore(columns)),
             "Isolation Forest": len(self.detect_outliers_isolation_forest(columns)),
-            "LOF": len(self.detect_outliers_lof(columns)
-            )
+            "LOF": len(self.detect_outliers_lof(columns)),
         }
 
         for method, count in methods.items():
+            results.append([method, count, round(count / total_rows * 100, 2)])
+        return pd.DataFrame(results, columns=["Method", "Outliers Found", "Percent"])
 
-            results.append([
-                method,
-                count,
-                round(count / total_rows * 100, 2)
-            ])
-        return pd.DataFrame(
-            results,
-            columns=["Method","Outliers Found","Percent"]
-        )
+
+class DataVisualising:
+    def __init__(self, dataframe):
+        self.df = dataframe
+
+    def plot_time_series(self, column):
+        fig, ax = plt.subplots()
+        ax.plot(self.df[column])
+        plt.show()
 
 
 def main():
-    df = pd.read_csv("factory_sensor_simulator_2040.csv")
-    print(df.head())
-    print(df.tail())
+    df = pd.read_csv("Datasets/no_fault.csv")
 
     preprocessor = DataPreprocessing(df)
 
-    print(preprocessor.compare_outlier_methods())
+    subset = preprocessor.select_experiment(
+        speed=25,
+        load=0
+    )
 
+    subset["time_x"] = pd.to_datetime(subset["time_x"])
+
+    
 
 if __name__ == "__main__":
     main()
