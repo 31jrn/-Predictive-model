@@ -129,9 +129,7 @@ class DataVisualising:
         fig, ax = plt.subplots(figsize=(12, 6))
 
         bars1 = ax.bar(x - width, comparison_df["Sensor1"], width, label="Сенсор 1")
-
         bars2 = ax.bar(x, comparison_df["Sensor2"], width, label="Сенсор 2")
-
         bars3 = ax.bar(
             x + width,
             comparison_df["Combined"],
@@ -139,17 +137,24 @@ class DataVisualising:
             label="Комбинированные",
         )
 
+        for bars in [bars1, bars2, bars3]:
+            for bar in bars:
+                height = bar.get_height()
+
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    height,
+                    f"{int(height)}",
+                    ha="center",
+                    va="bottom",
+                )
+
         ax.set_title("Сравнение методов поиска выбросов")
-
         ax.set_xlabel("Метод")
-
-        ax.set_ylabel("Количество выбросов")
-
+        ax.set_ylabel("Количество обнаруженных выбросов")
         ax.set_xticks(x)
         ax.set_xticklabels(methods)
-
         ax.legend()
-
         ax.grid(axis="y", linestyle="--", alpha=0.7)
 
         plt.tight_layout()
