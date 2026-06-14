@@ -7,7 +7,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from scipy.fft import fft, fftfreq
 from statsmodels.tsa.stattools import acf
-
+from scipy.signal import find_peaks
 
 """Класс предобработки данных для обнаружения выбросов в датасете."""
 
@@ -113,6 +113,70 @@ class DataPreprocessing:
         return pd.DataFrame(
             results, columns=["Method", "Sensor1", "Sensor2", "Combined"]
         )
+
+    def analyze_outliers(
+        self, column, neighbour_window=5, min_methods=2, deviation_threshold=2
+    ):
+
+        iqr_idx = set(self.detect_outliers_iqr([column]).index)
+        z_idx = set(self.detect_outliers_zscore([column]).index)
+        if_idx = set(self.detect_outliers_isolation_forest([column]).index)
+        lof_idx = set(self.detect_outliers_lof([column]).index)
+
+        all_indexes = iqr_idx | z_idx | if_idx | lof_idx
+
+        results = []
+
+        for idx in all_indexes:
+            # Условие 1. Количество голосов
+
+            votes = sum([idx in iqr_idx, idx in z_idx, idx in if_idx, idx in lof_idx])
+
+            # Условие 2. Анализ соседей
+
+            start = max(0, idx - neighbour_window)
+            end = min(len(self.df), idx + neighbour_window + 1)
+
+            neighbours = (
+                self.df[column].iloc[start:end].drop(index=idx, errors="ignore")
+            )
+
+            local_mean = neighbours.mean()
+            local_std = neighbours.std()
+            local_median = neighbours.median()
+            deviation_percent = (
+                abs(self.df.loc[idx, column] - local_median) / abs(local_median) * 100
+            )
+
+            if local_std == 0:
+                continue
+
+            is_sharp_outlier = (
+                abs(self.df.loc[idx, column] - local_mean)
+                > deviation_threshold * local_std
+            )
+
+            if votes >= min_methods and is_sharp_outlier:
+                results.append(
+                    {
+                        "index": idx,
+                        "value": self.df.loc[idx, column],
+                        "votes": votes,
+                        "local_mean": local_mean,
+                        "local_median": local_median,
+                        "Deviation, %": deviation_percent,
+                    }
+                )
+
+        return pd.DataFrame(results)
+
+    def replace_confirmed_outliers(self, column, analyzed_outliers):
+
+        for _, row in analyzed_outliers.iterrows():
+            idx = row["index"]
+            self.df.loc[idx, column] = row["local_median"]
+
+        return self.df
 
 
 class DataVisualising:
@@ -232,24 +296,37 @@ class PeriodicityAnalyzer:
     def __init__(self, dataframe):
         self.df = dataframe
 
-    def find_period_acf(self, column, nlags=1000):
+    def find_period_acf(
+        self, column, expected_period=None, search_window=50, nlags=1000
+    ):
 
         signal = self.df[column].values
+        # Удаляем среднее значение
+        signal = signal - np.mean(signal)
+        # Считаем ACF
         acf_values = acf(signal, nlags=nlags, fft=True)
-        peaks = []
+        # Ищем пики только в нужном диапазоне лагов
+        peaks, properties = find_peaks(
+            acf_values,
+            prominence=0.01,  # можно менять 0.005-0.05
+        )
 
-        for i in range(1, len(acf_values) - 1):
-            if acf_values[i] > acf_values[i - 1] and acf_values[i] > acf_values[i + 1]:
-                peaks.append(i)
+        candidate_peaks = peaks
 
-        if not peaks:
-            period = np.argmax(acf_values[1:]) + 1
+        if expected_period is not None:
+            mask = (peaks >= expected_period - search_window) & (
+                peaks <= expected_period + search_window
+            )
+            candidate_peaks = peaks[mask]
+
+        if len(candidate_peaks) > 0:
+            period = candidate_peaks[np.argmax(acf_values[candidate_peaks])]
         else:
-            period = peaks[0]
+            period = expected_period
 
         lags = np.arange(len(acf_values))
 
-        return period, lags, acf_values
+        return period, lags, acf_values, peaks
 
     def find_period_fft(self, column, sampling_interval=0.0002):
 
@@ -264,11 +341,60 @@ class PeriodicityAnalyzer:
 
         frequencies = xf[positive]
         amplitudes = np.abs(yf[positive])
-        peak_idx = np.argmax(amplitudes)
-        dominant_frequency = frequencies[peak_idx]
+        # peak_idx = np.argmax(amplitudes)
+        # dominant_frequency = frequencies[peak_idx]
+
+        mask = (frequencies > 15) & (frequencies < 35)
+
+        freq_local = frequencies[mask]
+        amp_local = amplitudes[mask]
+
+        top_idx = np.argsort(amp_local)[-5:]
+        print("\n5 наиболее мощных спектральных пиков FFT:")
+        for idx in reversed(top_idx):
+            freq = freq_local[idx]
+            period = int(round(1 / (freq * sampling_interval)))
+            print(f"freq={freq:.4f}, period={period}, amp={amp_local[idx]:.2f}")
+
+        best_idx = top_idx[-1]
+
+        dominant_frequency = freq_local[best_idx]
+
         period_seconds = 1 / dominant_frequency
         period_samples = int(round(period_seconds / sampling_interval))
-        return (period_samples, frequencies, amplitudes, dominant_frequency)
+
+        return (
+            period_samples,
+            frequencies,
+            amplitudes,
+            dominant_frequency,
+        )
+
+    def find_period_msdf(self, column, k_min=2, k_max=1000):
+
+        signal = self.df[column].values
+        signal = signal - np.mean(signal)
+
+        lags = np.arange(k_min, k_max)
+
+        msdf = np.zeros(len(lags))
+
+        for i, k in enumerate(lags):
+            diff = signal[k:] - signal[:-k]
+            msdf[i] = np.mean(diff**2)
+
+        minima = []
+
+        for i in range(1, len(msdf) - 1):
+            if msdf[i - 1] > msdf[i] and msdf[i] < msdf[i + 1]:
+                minima.append(i)
+
+        if minima:
+            period = lags[minima[0]]
+        else:
+            period = lags[np.argmin(msdf)]
+
+        return period, lags, msdf
 
 
 def main():
@@ -278,31 +404,86 @@ def main():
     subset = df[(df["speedSet"] == 25) & (df["load_value"] == 0)].copy()
     subset = subset[["sensor1", "sensor2", "time_x"]]
     subset["time_x"] = pd.to_datetime(subset["time_x"])
+    subset = subset.reset_index(drop=True)
 
-    preprocessor = DataPreprocessing(subset)
     periodicity = PeriodicityAnalyzer(subset)
     visualizer = DataVisualising(subset)
 
-    # 1. Выявление периодичности
-    # А) Автокорреляция
-    period_acf, lags, acf_values = periodicity.find_period_acf(
-        column="sensor1", nlags=1000
-    )
-    print(f"Период (ACF): {period_acf}")
-    visualizer.plot_acf(lags, acf_values, period_acf)
+    sensors = ["sensor1", "sensor2"]
+    results = []
 
-    # Б) Быстрое преобразование Фурье
-    period_fft, frequencies, amplitudes, dominant_frequency = (
-        periodicity.find_period_fft(column="sensor1")
-    )
-    print(f"Период (FFT): {period_fft}")
-    visualizer.plot_fft_spectrum(frequencies, amplitudes, dominant_frequency)
+    for sensor in sensors:
+        print(f"\n{'=' * 50}")
+        print(f"Анализ {sensor}")
+        print(f"{'=' * 50}")
 
-    comparison = preprocessor.compare_outlier_methods()
-    print(comparison)
+        sensor_preprocessor = DataPreprocessing(subset.copy())
 
-    visualizer.plot_data_overview(column="sensor1")
-    visualizer.plot_outlier_method_comparison(comparison)
+        # 1. Поиск периодичности ДО очистки
+
+        period_fft, frequencies, amplitudes, dominant_frequency = (
+            periodicity.find_period_fft(sensor)
+        )
+
+        print(f"\nПериод FFT: {period_fft}")
+
+        period_acf, lags, acf_values, peaks = periodicity.find_period_acf(
+            sensor, expected_period=period_fft, search_window=int(period_fft * 0.25)
+        )
+
+        print(f"Период ACF: {period_acf}\n")
+        visualizer.plot_acf(lags, acf_values, period_acf)
+
+        # 2. Статистика выбросов
+
+        comparison = sensor_preprocessor.compare_outlier_methods()
+        print("Количество выбросов, выявленных различными методами: ")
+        print(comparison)
+        visualizer.plot_data_overview(column=sensor)
+        visualizer.plot_outlier_method_comparison(comparison)
+
+        export_choice = input(
+            "\nВыгрузить подробную информацию о выбросах в CSV? (y/n): "
+        ).lower()
+        export_outliers = export_choice == "y"
+
+        # 3. Анализ подтвержденных выбросов и выгрузка(доп)
+
+        confirmed_outliers = sensor_preprocessor.analyze_outliers(column=sensor)
+        print("\nПодтвержденные выбросы(первые 5):")
+        print(confirmed_outliers.head())
+        print(f"\nПодтверждено выбросов: {len(confirmed_outliers)}")
+
+        if export_outliers:
+            filename = f"Выбросы_{sensor}.csv"
+            confirmed_outliers.to_csv(filename, index=False, encoding="utf-8-sig")
+            print(f"Файл сохранен: {filename}")
+
+        # 4. Очистка
+
+        clean_df = sensor_preprocessor.replace_confirmed_outliers(
+            column=sensor, analyzed_outliers=confirmed_outliers
+        )
+
+        # 5. Повторный поиск периода
+
+        period_test = PeriodicityAnalyzer(clean_df)
+        period_fft_after, _, _, _ = period_test.find_period_fft(column=sensor)
+        print(f"\nПериод FFT после очистки: {period_fft_after}")
+
+        # 6. Итоговая таблица
+
+        results.append(
+            {
+                "Сенсор": sensor,
+                "Период до очистки": period_fft,
+                "Подтверждено выбросов": len(confirmed_outliers),
+                "Доля выбросов, %": round(
+                    len(confirmed_outliers) / len(subset) * 100, 2
+                ),
+                "Период после очистки": period_fft_after,
+            }
+        )
 
 
 if __name__ == "__main__":
