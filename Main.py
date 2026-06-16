@@ -437,9 +437,9 @@ def main():
         # 2. Статистика выбросов
 
         comparison = sensor_preprocessor.compare_outlier_methods()
+        visualizer.plot_data_overview(column=sensor)
         print("Количество выбросов, выявленных различными методами: ")
         print(comparison)
-        visualizer.plot_data_overview(column=sensor)
         visualizer.plot_outlier_method_comparison(comparison)
 
         export_choice = input(
