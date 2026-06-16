@@ -340,7 +340,7 @@ class PeriodicityAnalyzer:
         positive = xf > 0
 
         frequencies = xf[positive]
-        amplitudes = np.abs(yf[positive])
+        amplitudes = 2.0 / n * np.abs(yf[positive])
         # peak_idx = np.argmax(amplitudes)
         # dominant_frequency = frequencies[peak_idx]
 
@@ -426,6 +426,7 @@ def main():
         )
 
         print(f"\nПериод FFT: {period_fft}")
+        visualizer.plot_fft_spectrum(frequencies, amplitudes, dominant_frequency)
 
         period_acf, lags, acf_values, peaks = periodicity.find_period_acf(
             sensor, expected_period=period_fft, search_window=int(period_fft * 0.25)
