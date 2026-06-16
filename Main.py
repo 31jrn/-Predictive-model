@@ -332,7 +332,18 @@ class PeriodicityAnalyzer:
 
         signal = self.df[column].values
         n = len(signal)
+
         signal = signal - np.mean(signal)
+        # проверка
+        print(signal.min())
+        print(signal.max())
+        print(signal.std())
+        print(
+            f"mean={np.mean(self.df[column]):.6f}, "
+            f"std={np.std(self.df[column]):.6f}, "
+            f"min={np.min(self.df[column]):.6f}, "
+            f"max={np.max(self.df[column]):.6f}"
+        )
 
         yf = fft(signal)
         xf = fftfreq(n, sampling_interval)
@@ -354,7 +365,7 @@ class PeriodicityAnalyzer:
         for idx in reversed(top_idx):
             freq = freq_local[idx]
             period = int(round(1 / (freq * sampling_interval)))
-            print(f"freq={freq:.4f}, period={period}, amp={amp_local[idx]:.2f}")
+            print(f"freq={freq:.4f}, period={period}, amp={amp_local[idx]:.5f}")
 
         best_idx = top_idx[-1]
 
@@ -369,32 +380,6 @@ class PeriodicityAnalyzer:
             amplitudes,
             dominant_frequency,
         )
-
-    def find_period_msdf(self, column, k_min=2, k_max=1000):
-
-        signal = self.df[column].values
-        signal = signal - np.mean(signal)
-
-        lags = np.arange(k_min, k_max)
-
-        msdf = np.zeros(len(lags))
-
-        for i, k in enumerate(lags):
-            diff = signal[k:] - signal[:-k]
-            msdf[i] = np.mean(diff**2)
-
-        minima = []
-
-        for i in range(1, len(msdf) - 1):
-            if msdf[i - 1] > msdf[i] and msdf[i] < msdf[i + 1]:
-                minima.append(i)
-
-        if minima:
-            period = lags[minima[0]]
-        else:
-            period = lags[np.argmin(msdf)]
-
-        return period, lags, msdf
 
 
 def main():
@@ -485,6 +470,11 @@ def main():
                 "Период после очистки": period_fft_after,
             }
         )
+    results_df = pd.DataFrame(results)
+    print(f"\n{'=' * 70}")
+    print("ИТОГОВЫЕ РЕЗУЛЬТАТЫ ОБРАБОТКИ")
+    print(f"{'=' * 70}")
+    print(results_df.to_string(index=False))
 
 
 if __name__ == "__main__":
