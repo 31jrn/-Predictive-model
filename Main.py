@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import sys
 
 from scipy.stats import zscore
 from sklearn.ensemble import IsolationForest
@@ -86,7 +87,7 @@ class DataPreprocessing:
 
         return self.df[mask]
 
-    def compare_outlier_methods(self):
+    def compare_outlier_methods(self, column):
 
         results = []
 
@@ -98,21 +99,11 @@ class DataPreprocessing:
         }
 
         for method_name, method in methods.items():
-            sensor1_outliers = method(columns=["sensor1"])
-            sensor2_outliers = method(columns=["sensor2"])
+            outliers = method(columns=[column])
 
-            sensor1_count = len(sensor1_outliers)
-            sensor2_count = len(sensor2_outliers)
+            results.append([method_name, len(outliers)])
 
-            combined_count = len(
-                pd.Index(sensor1_outliers.index).union(sensor2_outliers.index)
-            )
-
-            results.append([method_name, sensor1_count, sensor2_count, combined_count])
-
-        return pd.DataFrame(
-            results, columns=["Method", "Sensor1", "Sensor2", "Combined"]
-        )
+        return pd.DataFrame(results, columns=["Method", "Outliers"])
 
     def analyze_outliers(
         self, column, neighbour_window=5, min_methods=2, deviation_threshold=2
@@ -187,39 +178,34 @@ class DataVisualising:
 
         methods = comparison_df["Method"]
 
-        x = np.arange(len(methods))
-        width = 0.25
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-        fig, ax = plt.subplots(figsize=(12, 6))
+        bars = ax.bar(methods, comparison_df["Outliers"])
 
-        bars1 = ax.bar(x - width, comparison_df["Sensor1"], width, label="Сенсор 1")
-        bars2 = ax.bar(x, comparison_df["Sensor2"], width, label="Сенсор 2")
-        bars3 = ax.bar(
-            x + width,
-            comparison_df["Combined"],
-            width,
-            label="Комбинированные",
+        for bar in bars:
+            height = bar.get_height()
+
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + 5,
+                f"{int(height)}",
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+            )
+
+        ax.set_title(
+            "Количество выбросов, обнаруженных различными методами",
+            fontsize=13,
+            fontweight="bold",
         )
-
-        for bars in [bars1, bars2, bars3]:
-            for bar in bars:
-                height = bar.get_height()
-
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    height,
-                    f"{int(height)}",
-                    ha="center",
-                    va="bottom",
-                )
-
-        ax.set_title("Сравнение методов поиска выбросов")
-        ax.set_xlabel("Метод")
-        ax.set_ylabel("Количество обнаруженных выбросов")
-        ax.set_xticks(x)
-        ax.set_xticklabels(methods)
-        ax.legend()
-        ax.grid(axis="y", linestyle="--", alpha=0.7)
+        ax.set_xlabel("Метод обнаружения выбросов", fontsize=11)
+        ax.set_ylabel("Количество выбросов", fontsize=11)
+        ax.grid(
+            axis="y",
+            linestyle="--",
+            alpha=0.5,
+        )
 
         plt.tight_layout()
         plt.show()
@@ -291,6 +277,67 @@ class DataVisualising:
         plt.tight_layout()
         plt.show()
 
+    def plot_before_after(
+        self,
+        original_df,
+        cleaned_df,
+        column,
+        confirmed_outliers,
+    ):
+
+        fig, ax = plt.subplots(figsize=(14, 6))
+
+        # Исходный ряд
+        ax.plot(
+            original_df.index,
+            original_df[column],
+            color="gray",
+            linewidth=1,
+            alpha=0.7,
+            label="Исходный ряд",
+        )
+
+        # Очищенный ряд
+        ax.plot(
+            cleaned_df.index,
+            cleaned_df[column],
+            color="blue",
+            linewidth=1.2,
+            label="Очищенный ряд",
+        )
+
+        # Подтвержденные выбросы
+        if not confirmed_outliers.empty:
+            idx = confirmed_outliers["index"].astype(int)
+
+            ax.scatter(
+                idx,
+                original_df.loc[idx, column],
+                color="red",
+                s=35,
+                zorder=5,
+                label="Подтвержденные выбросы",
+            )
+        for idx in confirmed_outliers["index"].astype(int):
+            ax.plot(
+                [idx, idx],
+                [original_df.loc[idx, column], cleaned_df.loc[idx, column]],
+                color="red",
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.7,
+            )
+
+        ax.set_title(f"Сравнение исходного и очищенного ряда ({column})")
+        ax.set_xlabel("Номер наблюдения")
+        ax.set_ylabel(column)
+
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend()
+
+        plt.tight_layout()
+        plt.show()
+
 
 class PeriodicityAnalyzer:
     def __init__(self, dataframe):
@@ -334,16 +381,6 @@ class PeriodicityAnalyzer:
         n = len(signal)
 
         signal = signal - np.mean(signal)
-        # проверка
-        print(signal.min())
-        print(signal.max())
-        print(signal.std())
-        print(
-            f"mean={np.mean(self.df[column]):.6f}, "
-            f"std={np.std(self.df[column]):.6f}, "
-            f"min={np.min(self.df[column]):.6f}, "
-            f"max={np.max(self.df[column]):.6f}"
-        )
 
         yf = fft(signal)
         xf = fftfreq(n, sampling_interval)
@@ -352,8 +389,6 @@ class PeriodicityAnalyzer:
 
         frequencies = xf[positive]
         amplitudes = 2.0 / n * np.abs(yf[positive])
-        # peak_idx = np.argmax(amplitudes)
-        # dominant_frequency = frequencies[peak_idx]
 
         mask = (frequencies > 15) & (frequencies < 35)
 
@@ -361,14 +396,7 @@ class PeriodicityAnalyzer:
         amp_local = amplitudes[mask]
 
         top_idx = np.argsort(amp_local)[-5:]
-        print("\n5 наиболее мощных спектральных пиков FFT:")
-        for idx in reversed(top_idx):
-            freq = freq_local[idx]
-            period = int(round(1 / (freq * sampling_interval)))
-            print(f"freq={freq:.4f}, period={period}, amp={amp_local[idx]:.5f}")
-
         best_idx = top_idx[-1]
-
         dominant_frequency = freq_local[best_idx]
 
         period_seconds = 1 / dominant_frequency
@@ -382,94 +410,160 @@ class PeriodicityAnalyzer:
         )
 
 
+def menu(options, title):
+    """
+    Универсальное меню выбора.
+    Parameters
+    ----------
+    options : list
+        Список доступных значений.
+    title : str
+        Заголовок меню.
+    Returns
+    -------
+    Выбранное значение.
+    """
+
+    print(f"\n{title}")
+
+    for idx, option in enumerate(options, start=1):
+        print(f"{idx}. {option}")
+
+    print("0. Выход")
+
+    while True:
+        choice = input("Введите номер: ")
+
+        if choice.isdigit():
+            choice = int(choice)
+
+            if choice == 0:
+                print("Работа программы завершена.")
+                sys.exit()
+
+            if 1 <= choice <= len(options):
+                selected = options[choice - 1]
+                print(f"\nВыбрано: {selected}\n")
+                return selected
+
+        print("Некорректный ввод. Повторите попытку.")
+
+
 def main():
 
     df = pd.read_csv("Datasets/no_fault.csv")
 
-    subset = df[(df["speedSet"] == 25) & (df["load_value"] == 0)].copy()
-    subset = subset[["sensor1", "sensor2", "time_x"]]
+    sensor = menu(["sensor1", "sensor2"], "Выберите датчик для анализа:")
+    speed = menu(sorted(df["speedSet"].unique()), "Выберите значение SpeedSet:")
+    available_loads = sorted(df[df["speedSet"] == speed]["load_value"].unique())
+    load = menu(available_loads, "Выберите значение Load:")
+
+    subset = df[(df["speedSet"] == speed) & (df["load_value"] == load)].copy()
+    subset = subset[[sensor, "time_x"]]
     subset["time_x"] = pd.to_datetime(subset["time_x"])
-    subset = subset.reset_index(drop=True)
+    subset.reset_index(drop=True, inplace=True)
+
+    results = []
+    # Анализ
+    print("=" * 50)
+    print(f"Анализ {sensor}")
+    print("=" * 50)
+
+    sensor_preprocessor = DataPreprocessing(subset.copy())
 
     periodicity = PeriodicityAnalyzer(subset)
     visualizer = DataVisualising(subset)
 
-    sensors = ["sensor1", "sensor2"]
-    results = []
+    # 1. Поиск периода до очистки
 
-    for sensor in sensors:
-        print(f"\n{'=' * 50}")
-        print(f"Анализ {sensor}")
-        print(f"{'=' * 50}")
+    period_fft, frequencies, amplitudes, dominant_frequency = (
+        periodicity.find_period_fft(sensor)
+    )
 
-        sensor_preprocessor = DataPreprocessing(subset.copy())
+    print(f"\nПериод FFT: {period_fft}")
+    visualizer.plot_fft_spectrum(frequencies, amplitudes, dominant_frequency)
 
-        # 1. Поиск периодичности ДО очистки
+    period_acf, lags, acf_values, peaks = periodicity.find_period_acf(
+        sensor, expected_period=period_fft, search_window=int(period_fft * 0.25)
+    )
 
-        period_fft, frequencies, amplitudes, dominant_frequency = (
-            periodicity.find_period_fft(sensor)
-        )
+    print(f"Период ACF: {period_acf}\n")
+    visualizer.plot_acf(lags, acf_values, period_acf)
 
-        print(f"\nПериод FFT: {period_fft}")
-        visualizer.plot_fft_spectrum(frequencies, amplitudes, dominant_frequency)
+    # 2. Статистика выбросов
 
-        period_acf, lags, acf_values, peaks = periodicity.find_period_acf(
-            sensor, expected_period=period_fft, search_window=int(period_fft * 0.25)
-        )
+    comparison = sensor_preprocessor.compare_outlier_methods(sensor)
+    visualizer.plot_data_overview(column=sensor)
+    print("Количество выбросов, выявленных различными методами: ")
+    print(comparison)
+    visualizer.plot_outlier_method_comparison(comparison)
 
-        print(f"Период ACF: {period_acf}\n")
-        visualizer.plot_acf(lags, acf_values, period_acf)
+    export_choice = input(
+        "\nВыгрузить подробную информацию о выбросах в CSV? (y/n): "
+    ).lower()
+    export_outliers = export_choice == "y"
 
-        # 2. Статистика выбросов
+    # 3. Анализ подтвержденных выбросов и выгрузка(доп)
 
-        comparison = sensor_preprocessor.compare_outlier_methods()
-        visualizer.plot_data_overview(column=sensor)
-        print("Количество выбросов, выявленных различными методами: ")
-        print(comparison)
-        visualizer.plot_outlier_method_comparison(comparison)
+    confirmed_outliers = sensor_preprocessor.analyze_outliers(sensor)
+    print("\nПодтвержденные выбросы(первые 5):")
+    print(confirmed_outliers.head())
+    print(f"\nПодтверждено выбросов: {len(confirmed_outliers)}")
 
-        export_choice = input(
-            "\nВыгрузить подробную информацию о выбросах в CSV? (y/n): "
-        ).lower()
-        export_outliers = export_choice == "y"
+    if export_outliers:
+        filename = f"Выбросы_{sensor}.csv"
+        confirmed_outliers.to_csv(filename, index=False, encoding="utf-8-sig")
+        print(f"Файл сохранен: {filename}")
 
-        # 3. Анализ подтвержденных выбросов и выгрузка(доп)
+    # 4. Очистка
 
-        confirmed_outliers = sensor_preprocessor.analyze_outliers(column=sensor)
-        print("\nПодтвержденные выбросы(первые 5):")
-        print(confirmed_outliers.head())
-        print(f"\nПодтверждено выбросов: {len(confirmed_outliers)}")
+    clean_df = sensor_preprocessor.replace_confirmed_outliers(
+        column=sensor, analyzed_outliers=confirmed_outliers
+    )
+    print("=" * 50)
+    print("Очистка данных завершена")
+    print("=" * 50)
+    print("\nПовторный анализ периодичности...")
 
-        if export_outliers:
-            filename = f"Выбросы_{sensor}.csv"
-            confirmed_outliers.to_csv(filename, index=False, encoding="utf-8-sig")
-            print(f"Файл сохранен: {filename}")
+    visualizer.plot_before_after(
+        original_df=subset,
+        cleaned_df=clean_df,
+        column=sensor,
+        confirmed_outliers=confirmed_outliers,
+    )
+    # 5. Повторный поиск периода
 
-        # 4. Очистка
+    period_test = PeriodicityAnalyzer(clean_df)
+    period_fft_after, frequencies, amplitudes, dominant_frequency = (
+        period_test.find_period_fft(column=sensor)
+    )
+    print(f"\nПериод FFT после очистки: {period_fft_after}")
+    visualizer.plot_fft_spectrum(frequencies, amplitudes, dominant_frequency)
 
-        clean_df = sensor_preprocessor.replace_confirmed_outliers(
-            column=sensor, analyzed_outliers=confirmed_outliers
-        )
+    period_acf_after, lags, acf_values, peaks = period_test.find_period_acf(
+        sensor,
+        expected_period=period_fft_after,
+        search_window=int(period_fft_after * 0.25),
+    )
+    print(f"Период ACF после очистки: {period_acf_after}\n")
+    visualizer.plot_acf(lags, acf_values, period_acf_after)
 
-        # 5. Повторный поиск периода
+    # 6. Итоговая таблица
 
-        period_test = PeriodicityAnalyzer(clean_df)
-        period_fft_after, _, _, _ = period_test.find_period_fft(column=sensor)
-        print(f"\nПериод FFT после очистки: {period_fft_after}")
-
-        # 6. Итоговая таблица
-
-        results.append(
-            {
-                "Сенсор": sensor,
-                "Период до очистки": period_fft,
-                "Подтверждено выбросов": len(confirmed_outliers),
-                "Доля выбросов, %": round(
-                    len(confirmed_outliers) / len(subset) * 100, 2
-                ),
-                "Период после очистки": period_fft_after,
-            }
-        )
+    results.append(
+        {
+            "Сенсор": sensor,
+            "FFT до": period_fft,
+            "ACF до": period_acf,
+            "Подтв. выбросов": len(confirmed_outliers),
+            "Доля, %": round(
+                len(confirmed_outliers) / len(subset) * 100,
+                2,
+            ),
+            "FFT после": period_fft_after,
+            "ACF после": period_acf_after,
+        }
+    )
     results_df = pd.DataFrame(results)
     print(f"\n{'=' * 70}")
     print("ИТОГОВЫЕ РЕЗУЛЬТАТЫ ОБРАБОТКИ")
