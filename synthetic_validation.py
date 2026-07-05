@@ -37,6 +37,7 @@ from Main import PeriodicityAnalyzer, DataPreprocessing
 
 # 1. Генерация синтетических данных
 
+
 def generate_periodic_signal(
     n=1500,
     period=50,
@@ -92,38 +93,23 @@ def compute_snr(amplitude, noise_std):
     Отношение сигнал/шум по мощности (в разах, не в дБ).
     Для синусоиды мощность сигнала = amplitude^2 / 2.
     """
-    signal_power = (amplitude ** 2) / 2
-    noise_power = noise_std ** 2
+    signal_power = (amplitude**2) / 2
+    noise_power = noise_std**2
     return signal_power / noise_power if noise_power > 0 else np.inf
 
 
 # 2. Обобщённый FFT-детектор периода
-#
-# В Main.py метод find_period_fft "заточен" под конкретный датчик:
-# использует sampling_interval в секундах и жёстко ищет пик только в
-# диапазоне 15-35 Гц. Для синтетических данных с произвольным периодом
-# (в отсчётах) такое ограничение неприменимо, поэтому здесь - обобщённая
-# версия без привязки к конкретному частотному диапазону.
+"""
+В Main.py метод find_period_fft "заточен" под конкретный датчик:
+использует sampling_interval в секундах и жёстко ищет пик только в
+диапазоне 15-35 Гц, поэтому здесь - обобщённая
+версия без привязки к конкретному частотному диапазону."""
+
 
 def find_period_fft_generic(signal, min_period=4, max_period=None):
     """
     Определяет доминирующий период сигнала через FFT в отсчётах
     (samples), без ограничения на конкретный частотный диапазон.
-
-    Parameters
-    ----------
-    signal : array-like
-    min_period : int
-        Минимально допустимый период - отсекает высокочастотный шум,
-        которому соответствовал бы нереалистично короткий "период".
-    max_period : int or None
-        Максимально допустимый период - отсекает низкочастотные
-        компоненты (в т.ч. остаточный тренд), которым соответствовал бы
-        нереалистично длинный "период". По умолчанию n // 2.
-
-    Returns
-    -------
-    period_samples, frequencies, amplitudes, dominant_frequency
     """
     signal = np.asarray(signal, dtype=float)
     n = len(signal)
@@ -162,6 +148,7 @@ def find_period_fft_generic(signal, min_period=4, max_period=None):
 
 
 # 3. Одиночная проверка + Монте-Карло повторы (период)
+
 
 def evaluate_period_detection(
     period,
@@ -233,17 +220,43 @@ def evaluate_period_detection(
 
 # 4. Группа A: 5 сценариев проверки периодичности
 
+
 def run_group_a_scenarios(n_repeats=30):
     """
     Прогоняет 5 сценариев проверки периодичности с разными периодами,
     уровнями шума и наличием тренда (нестационарность).
     """
     scenarios = [
-        {"name": "1. База (T=50, низкий шум)", "period": 50, "noise_std": 0.1, "trend_slope": 0.0},
-        {"name": "2. Высокий шум (T=50)", "period": 50, "noise_std": 0.8, "trend_slope": 0.0},
-        {"name": "3. Короткий период (T=20)", "period": 20, "noise_std": 0.1, "trend_slope": 0.0},
-        {"name": "4. Длинный период (T=200)", "period": 200, "noise_std": 0.1, "trend_slope": 0.0},
-        {"name": "5. Тренд + средний шум (T=50)", "period": 50, "noise_std": 0.3, "trend_slope": 0.002},
+        {
+            "name": "1. База (T=50, низкий шум)",
+            "period": 50,
+            "noise_std": 0.1,
+            "trend_slope": 0.0,
+        },
+        {
+            "name": "2. Высокий шум (T=50)",
+            "period": 50,
+            "noise_std": 0.8,
+            "trend_slope": 0.0,
+        },
+        {
+            "name": "3. Короткий период (T=20)",
+            "period": 20,
+            "noise_std": 0.1,
+            "trend_slope": 0.0,
+        },
+        {
+            "name": "4. Длинный период (T=200)",
+            "period": 200,
+            "noise_std": 0.1,
+            "trend_slope": 0.0,
+        },
+        {
+            "name": "5. Тренд + средний шум (T=50)",
+            "period": 50,
+            "noise_std": 0.3,
+            "trend_slope": 0.002,
+        },
     ]
 
     all_results = []
@@ -287,6 +300,7 @@ def run_group_a_scenarios(n_repeats=30):
 
 # 5. Кривая "ошибка от SNR" (вместо отдельных точек)
 
+
 def run_snr_curve(period=50, n=1500, amplitude=1.0, n_repeats=20, noise_levels=None):
     """
     Строит зависимость относительной ошибки периода от уровня шума (SNR).
@@ -325,6 +339,7 @@ def run_snr_curve(period=50, n=1500, amplitude=1.0, n_repeats=20, noise_levels=N
 
 
 # 6. Визуализация периодичности
+
 
 def plot_example_signal(period=50, noise_std=0.3, n=1500, seed=1):
     df = generate_periodic_signal(n=n, period=period, noise_std=noise_std, seed=seed)
@@ -404,6 +419,7 @@ def plot_snr_curve(snr_df):
 
 # 7. Внедрение выбросов с известными позициями
 
+
 def inject_outliers(df, column="value", fraction=0.05, magnitude_k=6.0, seed=None):
     """
     Внедряет точечные выбросы в df[column] в случайно выбранные, но
@@ -447,6 +463,7 @@ def inject_outliers(df, column="value", fraction=0.05, magnitude_k=6.0, seed=Non
 
 # 8. Метрики качества детекции выбросов (матрица ошибок)
 
+
 def confusion_metrics(true_idx, pred_idx, total_n):
     """
     Считает TP/FP/FN/TN и Precision/Recall/F1 по известным истинным
@@ -478,6 +495,7 @@ def confusion_metrics(true_idx, pred_idx, total_n):
 
 # 9. Одиночная проверка + Монте-Карло повторы (выбросы)
 
+
 def evaluate_outlier_detection(
     fraction,
     n=1500,
@@ -504,9 +522,15 @@ def evaluate_outlier_detection(
 
     for i in range(n_repeats):
         seed = base_seed + i
-        df = generate_periodic_signal(n=n, period=period, noise_std=noise_std, seed=seed)
+        df = generate_periodic_signal(
+            n=n, period=period, noise_std=noise_std, seed=seed
+        )
         df_out, true_idx = inject_outliers(
-            df, column="value", fraction=fraction, magnitude_k=magnitude_k, seed=seed + 500_000
+            df,
+            column="value",
+            fraction=fraction,
+            magnitude_k=magnitude_k,
+            seed=seed + 500_000,
         )
 
         contamination = fraction if oracle_contamination else fixed_contamination
@@ -545,6 +569,7 @@ def evaluate_outlier_detection(
 
 
 # 10. Группа B: 5 сценариев (доли выбросов 5/10/15/20/25%)
+
 
 def run_group_b_scenarios(n_repeats=20, fractions=(0.05, 0.10, 0.15, 0.20, 0.25)):
     """
@@ -609,6 +634,7 @@ def print_group_b_summary_by_method(summary_df):
 
 # 10а. Чувствительность к магнитуде выброса (граница обнаружения)
 
+
 def run_magnitude_sensitivity(
     fraction=0.10,
     magnitude_values=(1.5, 2.0, 3.0, 4.0, 6.0, 9.0),
@@ -672,6 +698,7 @@ def plot_magnitude_sensitivity(magnitude_df):
 
 # 11. Чувствительность к параметру contamination (IF / LOF)
 
+
 def run_contamination_sensitivity(
     true_fraction=0.10,
     contamination_values=(0.02, 0.05, 0.10, 0.15, 0.20, 0.30),
@@ -717,6 +744,7 @@ def run_contamination_sensitivity(
 
 # 12. Визуализация выбросов
 
+
 def plot_example_signal_with_outliers(fraction=0.10, seed=1):
     df = generate_periodic_signal(n=1500, period=50, noise_std=0.3, seed=seed)
     df_out, true_idx = inject_outliers(df, fraction=fraction, seed=seed + 500_000)
@@ -729,7 +757,7 @@ def plot_example_signal_with_outliers(fraction=0.10, seed=1):
         df_out.loc[outlier_positions, "value"],
         color="red",
         zorder=5,
-        label=f"Внедрённые выбросы ({len(true_idx)} шт., {fraction*100:.0f}%)",
+        label=f"Внедрённые выбросы ({len(true_idx)} шт., {fraction * 100:.0f}%)",
     )
     ax.set_title("Пример синтетических данных с внедрёнными выбросами")
     ax.set_xlabel("Номер отсчёта")
@@ -755,7 +783,9 @@ def plot_metrics_vs_fraction(summary_df):
     for ax, (mean_col, std_col, title) in zip(axes, metric_cols):
         for method, group in summary_df.groupby("Метод"):
             group = group.sort_values("Доля выбросов, %")
-            ax.plot(group["Доля выбросов, %"], group[mean_col], marker="o", label=method)
+            ax.plot(
+                group["Доля выбросов, %"], group[mean_col], marker="o", label=method
+            )
             lower = np.maximum(0, group[mean_col] - group[std_col])
             upper = np.minimum(1, group[mean_col] + group[std_col])
             ax.fill_between(group["Доля выбросов, %"], lower, upper, alpha=0.12)
@@ -833,6 +863,7 @@ def plot_contamination_sensitivity(sensitivity_df):
 
 # 13. Точка входа
 
+
 def main():
     print("=" * 70)
     print("ПРОВЕРКА МЕТОДОВ ПРЕДОБРАБОТКИ НА СИНТЕТИЧЕСКИХ ДАННЫХ")
@@ -849,8 +880,12 @@ def main():
     snr_df = run_snr_curve()
     plot_snr_curve(snr_df)
 
-    detailed_period_df.to_csv("period_validation_detailed.csv", index=False, encoding="utf-8-sig")
-    summary_period_df.to_csv("period_validation_summary.csv", index=False, encoding="utf-8-sig")
+    detailed_period_df.to_csv(
+        "period_validation_detailed.csv", index=False, encoding="utf-8-sig"
+    )
+    summary_period_df.to_csv(
+        "period_validation_summary.csv", index=False, encoding="utf-8-sig"
+    )
     snr_df.to_csv("period_validation_snr_curve.csv", index=False, encoding="utf-8-sig")
 
     # --- Выбросы ---
@@ -867,13 +902,21 @@ def main():
     magnitude_df = run_magnitude_sensitivity()
     plot_magnitude_sensitivity(magnitude_df)
 
-    detailed_outliers_df.to_csv("outlier_validation_detailed.csv", index=False, encoding="utf-8-sig")
-    summary_outliers_df.to_csv("outlier_validation_summary.csv", index=False, encoding="utf-8-sig")
+    detailed_outliers_df.to_csv(
+        "outlier_validation_detailed.csv", index=False, encoding="utf-8-sig"
+    )
+    summary_outliers_df.to_csv(
+        "outlier_validation_summary.csv", index=False, encoding="utf-8-sig"
+    )
     sensitivity_df.to_csv(
-        "outlier_validation_contamination_sensitivity.csv", index=False, encoding="utf-8-sig"
+        "outlier_validation_contamination_sensitivity.csv",
+        index=False,
+        encoding="utf-8-sig",
     )
     magnitude_df.to_csv(
-        "outlier_validation_magnitude_sensitivity.csv", index=False, encoding="utf-8-sig"
+        "outlier_validation_magnitude_sensitivity.csv",
+        index=False,
+        encoding="utf-8-sig",
     )
 
     print(
