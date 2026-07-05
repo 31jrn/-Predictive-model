@@ -8,7 +8,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from scipy.fft import fft, fftfreq
 from statsmodels.tsa.stattools import acf
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, detrend
 
 """Класс предобработки данных для обнаружения выбросов в датасете."""
 
@@ -378,28 +378,40 @@ class PeriodicityAnalyzer:
     def find_period_fft(self, column, sampling_interval=0.0002):
 
         signal = self.df[column].values
+
         n = len(signal)
 
-        signal = signal - np.mean(signal)
+        """Удаляем линейный тренд (и заодно среднее значение) перед спектральным анализом.
+        Без этого шага линейная составляющая сигнала даёт в спектре паразитный пик на очень
+        низкой частоте, который может исказить оценку амплитуд соседних частот и, в общем случае,
+        привести к ошибочному определению доминирующей частоты."""
+
+        signal = detrend(signal, type="linear")
 
         yf = fft(signal)
+
         xf = fftfreq(n, sampling_interval)
 
         positive = xf > 0
 
         frequencies = xf[positive]
+
         amplitudes = 2.0 / n * np.abs(yf[positive])
 
         mask = (frequencies > 15) & (frequencies < 35)
 
         freq_local = frequencies[mask]
+
         amp_local = amplitudes[mask]
 
         top_idx = np.argsort(amp_local)[-5:]
+
         best_idx = top_idx[-1]
+
         dominant_frequency = freq_local[best_idx]
 
         period_seconds = 1 / dominant_frequency
+
         period_samples = int(round(period_seconds / sampling_interval))
 
         return (
