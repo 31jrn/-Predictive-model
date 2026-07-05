@@ -1,1 +1,8 @@
 __pycache__/Main.cpython-313.pyc
+outlier_validation_contamination_sensitivity.csv
+outlier_validation_detailed.csv
+outlier_validation_magnitude_sensitivity.csv
+period_validation_detailed.csv
+period_validation_snr_curve.csv
+outlier_validation_summary.csv
+period_validation_summary.csv

@@ -389,29 +389,22 @@ class PeriodicityAnalyzer:
         signal = detrend(signal, type="linear")
 
         yf = fft(signal)
-
         xf = fftfreq(n, sampling_interval)
-
         positive = xf > 0
 
         frequencies = xf[positive]
-
         amplitudes = 2.0 / n * np.abs(yf[positive])
-
         mask = (frequencies > 15) & (frequencies < 35)
 
         freq_local = frequencies[mask]
-
         amp_local = amplitudes[mask]
 
         top_idx = np.argsort(amp_local)[-5:]
-
         best_idx = top_idx[-1]
 
         dominant_frequency = freq_local[best_idx]
 
         period_seconds = 1 / dominant_frequency
-
         period_samples = int(round(period_seconds / sampling_interval))
 
         return (
